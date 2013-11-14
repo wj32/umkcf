@@ -1,4 +1,5 @@
 driver/default/objchk_*
+driver/buildchk_*
 
 #################
 ## Eclipse

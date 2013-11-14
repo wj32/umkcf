@@ -10,7 +10,7 @@
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
- * PUMKCF is distributed in the hope that it will be useful,
+ * UMKCF is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
@@ -24,6 +24,7 @@
 DRIVER_INITIALIZE DriverEntry;
 DRIVER_UNLOAD DriverUnload;
 __drv_dispatchType(IRP_MJ_CREATE) DRIVER_DISPATCH KcfDispatchCreate;
+__drv_dispatchType(IRP_MJ_CLOSE) DRIVER_DISPATCH KcfDispatchClose;
 
 ULONG KcfpReadIntegerParameter(
     __in_opt HANDLE KeyHandle,
@@ -60,7 +61,10 @@ NTSTATUS DriverEntry(
     KcfDriverObject = DriverObject;
 
     if (!NT_SUCCESS(status = KcfpReadDriverParameters(RegistryPath)))
-        return status;
+        goto ErrorExit;
+
+    if (!NT_SUCCESS(status = KcfPsInitialization()))
+        goto ErrorExit;
 
     // Create the device.
 
@@ -77,19 +81,27 @@ NTSTATUS DriverEntry(
         );
 
     if (!NT_SUCCESS(status))
-        return status;
+        goto ErrorExit;
+
+    KcfClientInitialization();
 
     KcfDeviceObject = deviceObject;
 
     // Set up I/O.
 
     DriverObject->MajorFunction[IRP_MJ_CREATE] = KcfDispatchCreate;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = KcfDispatchClose;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = KcfDispatchDeviceControl;
     DriverObject->DriverUnload = DriverUnload;
 
     deviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 
     dprintf("Driver loaded\n");
+
+    return status;
+
+ErrorExit:
+    KcfPsUninitialization();
 
     return status;
 }
@@ -101,6 +113,8 @@ VOID DriverUnload(
     PAGED_CODE();
 
     IoDeleteDevice(KcfDeviceObject);
+    KcfPsUninitialization();
+    KcfClientUninitialization();
 
     dprintf("Driver unloaded\n");
 }
@@ -112,12 +126,15 @@ NTSTATUS KcfDispatchCreate(
 {
     NTSTATUS status = STATUS_SUCCESS;
     PIO_STACK_LOCATION stackLocation;
+    PFILE_OBJECT fileObject;
     PIO_SECURITY_CONTEXT securityContext;
-
-    stackLocation = IoGetCurrentIrpStackLocation(Irp);
-    securityContext = stackLocation->Parameters.Create.SecurityContext;
+    PKCF_CLIENT client;
 
     dprintf("Client (PID %Iu) is connecting\n", PsGetCurrentProcessId());
+
+    stackLocation = IoGetCurrentIrpStackLocation(Irp);
+    fileObject = stackLocation->FileObject;
+    securityContext = stackLocation->Parameters.Create.SecurityContext;
 
     if (KcfParameters.SecurityLevel == KcfSecurityPrivilegeCheck)
     {
@@ -143,6 +160,46 @@ NTSTATUS KcfDispatchCreate(
             dprintf("Client (PID %Iu) was rejected\n", PsGetCurrentProcessId());
         }
     }
+
+    if (NT_SUCCESS(status))
+    {
+        status = KcfCreateClient(&client);
+
+        if (NT_SUCCESS(status))
+        {
+            fileObject->FsContext = client;
+        }
+        else
+        {
+            dprintf("Unable to create client object: 0x%x\n", status);
+        }
+    }
+
+    Irp->IoStatus.Status = status;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return status;
+}
+
+NTSTATUS KcfDispatchClose(
+    __in PDEVICE_OBJECT DeviceObject,
+    __in PIRP Irp
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    PIO_STACK_LOCATION stackLocation;
+    PFILE_OBJECT fileObject;
+    PKCF_CLIENT client;
+
+    dprintf("Client (PID %Iu) is disconnecting\n", PsGetCurrentProcessId());
+
+    stackLocation = IoGetCurrentIrpStackLocation(Irp);
+    fileObject = stackLocation->FileObject;
+    client = fileObject->FsContext;
+
+    if (client)
+        KcfDestroyClient(client);
 
     Irp->IoStatus.Status = status;
     Irp->IoStatus.Information = 0;
@@ -264,4 +321,31 @@ NTSTATUS KcfpReadDriverParameters(
         ZwClose(parametersKeyHandle);
 
     return status;
+}
+
+NTSTATUS KcfiQueryVersion(
+    __out PULONG Version,
+    __in KPROCESSOR_MODE AccessMode
+    )
+{
+    PAGED_CODE();
+
+    if (AccessMode != KernelMode)
+    {
+        __try
+        {
+            ProbeForWrite(Version, sizeof(ULONG), sizeof(ULONG));
+            *Version = KCF_VERSION;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return GetExceptionCode();
+        }
+    }
+    else
+    {
+        *Version = KCF_VERSION;
+    }
+
+    return STATUS_SUCCESS;
 }
