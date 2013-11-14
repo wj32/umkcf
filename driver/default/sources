@@ -1,0 +1,7 @@
+!IF 0
+
+The default configuration.
+
+!ENDIF
+
+!include ..\sources.inc
