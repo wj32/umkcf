@@ -71,20 +71,65 @@ VOID KcfpCreateProcessNotifyRoutineEx(
     __in_opt PPS_CREATE_NOTIFY_INFO CreateInfo
     )
 {
+    NTSTATUS status;
     KCF_CALLBACK_DATA data;
+    PKCF_CLIENT clients[KCF_MAXIMUM_CLIENTS];
+    ULONG numberOfClients;
+    ULONG i;
 
     PAGED_CODE();
 
-    KcfInitializeCallbackData(&data, KcfMakeEventId(KCF_CATEGORY_PROCESS, CreateInfo ? KCF_PROCESS_EVENT_CREATE_PROCESS : KCF_PROCESS_EVENT_EXIT_PROCESS));
-    data.Parameters.CreateProcess.ProcessId = ProcessId;
+    KcfInitializeCallbackData(&data, KcfMakeEventId(KCF_CATEGORY_PROCESS, CreateInfo ? KCF_PROCESS_EVENT_PROCESS_CREATE : KCF_PROCESS_EVENT_PROCESS_EXIT));
+    data.Parameters.ProcessCreate.ProcessId = ProcessId;
 
     if (CreateInfo)
     {
-        data.Parameters.CreateProcess.ParentProcessId = CreateInfo->ParentProcessId;
-        data.Parameters.CreateProcess.CreatingThreadId = CreateInfo->CreatingThreadId;
-        data.Parameters.CreateProcess.ImageFileName = *CreateInfo->ImageFileName;
+        dprintf("KcfpCreateProcessNotifyRoutineEx: Create PID %u: %.*S\n", (ULONG)ProcessId, CreateInfo->ImageFileName->Length / 2, CreateInfo->ImageFileName->Buffer);
+
+        data.Parameters.ProcessCreate.ParentProcessId = CreateInfo->ParentProcessId;
+        data.Parameters.ProcessCreate.CreatingThreadId = CreateInfo->CreatingThreadId;
+        data.Parameters.ProcessCreate.ImageFileName = *CreateInfo->ImageFileName;
         if (CreateInfo->CommandLine)
-            data.Parameters.CreateProcess.CommandLine = *CreateInfo->CommandLine;
-        data.Parameters.CreateProcess.FileOpenNameAvailable = CreateInfo->FileOpenNameAvailable;
+            data.Parameters.ProcessCreate.CommandLine = *CreateInfo->CommandLine;
+        data.Parameters.ProcessCreate.FileOpenNameAvailable = CreateInfo->FileOpenNameAvailable;
+    }
+    else
+    {
+        dprintf("KcfpCreateProcessNotifyRoutineEx: Exit PID %u\n", (ULONG)ProcessId);
+    }
+
+    if (KcfGetClientsForCallback(clients, KCF_MAXIMUM_CLIENTS, &numberOfClients, &data, NULL, 0))
+    {
+        dprintf("KcfpCreateProcessNotifyRoutineEx: %u clients\n", numberOfClients);
+
+        for (i = 0; i < numberOfClients; i++)
+        {
+            PKCF_CLIENT client;
+            PKCF_CALLBACK callback;
+            PKCF_CALLBACK_RETURN_DATA returnData;
+
+            client = clients[i];
+
+            if (NT_SUCCESS(KcfCreateCallback(&callback, client, &data)))
+            {
+                status = KcfPerformCallback(callback, ExGetPreviousMode(), NULL, &returnData);
+
+                if (NT_SUCCESS(status) && returnData)
+                {
+                    if (CreateInfo)
+                        CreateInfo->CreationStatus = returnData->Parameters.ProcessCreate.CreationStatus;
+
+                    KcfFreeReturnData(returnData);
+                }
+
+                KcfDereferenceCallback(callback);
+            }
+
+            KcfDereferenceClient(client);
+        }
+    }
+    else
+    {
+        dprintf("KcfpCreateProcessNotifyRoutineEx: no clients\n");
     }
 }

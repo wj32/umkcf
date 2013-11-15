@@ -18,31 +18,24 @@ typedef enum _KCF_SECURITY_LEVEL
     KcfMaxSecurityLevel
 } KCF_SECURITY_LEVEL, *PKCF_SECURITY_LEVEL;
 
+// Callbacks
+
 typedef ULONG KCF_CALLBACK_ID, *PKCF_CALLBACK_ID;
 
-#define KCF_CATEGORY_FRAMEWORK 0x1
-#define KCF_CATEGORY_PROCESS 0x2
-#define KCF_CATEGORY_OBJECT 0x4
-#define KCF_CATEGORY_REGISTRY 0x8
-#define KCF_CATEGORY_FILE 0x10
-
-// Internal use only
-typedef enum _KCF_CATEGORY
-{
-    CategoryFramework = 0,
-    CategoryProcess = 1,
-    CategoryObject = 2,
-    CategoryRegistry = 3,
-    CategoryFile = 4,
-    CategoryMaximum
-} KCF_CATEGORY;
+// Categories
+#define KCF_CATEGORY_FRAMEWORK 0
+#define KCF_CATEGORY_PROCESS 1
+#define KCF_CATEGORY_OBJECT 2
+#define KCF_CATEGORY_REGISTRY 3
+#define KCF_CATEGORY_FILE 4
+#define KCF_CATEGORY_MAXIMUM 5
 
 // Process
-#define KCF_PROCESS_EVENT_CREATE_PROCESS 0
-#define KCF_PROCESS_EVENT_EXIT_PROCESS 1
-#define KCF_PROCESS_EVENT_CREATE_THREAD 2
-#define KCF_PROCESS_EVENT_EXIT_THREAD 3
-#define KCF_PROCESS_EVENT_LOAD_IMAGE 4
+#define KCF_PROCESS_EVENT_PROCESS_CREATE 0
+#define KCF_PROCESS_EVENT_PROCESS_EXIT 1
+#define KCF_PROCESS_EVENT_THREAD_CREATE 2
+#define KCF_PROCESS_EVENT_THREAD_EXIT 3
+#define KCF_PROCESS_EVENT_IMAGE_LOAD 4
 
 typedef struct _KCF_EVENT_ID
 {
@@ -96,11 +89,11 @@ typedef struct _KCF_CALLBACK_DATA
             UNICODE_STRING ImageFileName;
             UNICODE_STRING CommandLine;
             BOOLEAN FileOpenNameAvailable;
-        } CreateProcess;
+        } ProcessCreate;
         struct
         {
             HANDLE ProcessId;
-        } ExitProcess;
+        } ProcessExit;
     } Parameters;
 } KCF_CALLBACK_DATA, *PKCF_CALLBACK_DATA;
 
@@ -113,14 +106,20 @@ typedef struct _KCF_CALLBACK_RETURN_DATA
         struct
         {
             NTSTATUS CreationStatus;
-        } CreateProcess;
+        } ProcessCreate;
     } Parameters;
 } KCF_CALLBACK_RETURN_DATA, *PKCF_CALLBACK_RETURN_DATA;
+
+// Filtering
+
+#define KCF_MAXIMUM_FILTERS 100
+#define KCF_EVENT_MASK_ALL (0xffffffffffffffffull)
 
 typedef enum _KCF_FILTER_TYPE
 {
     FilterInclude,
-    FilterExclude
+    FilterExclude,
+    FilterTypeMaximum
 } KCF_FILTER_TYPE;
 
 typedef enum _KCF_FILTER_KEY
@@ -140,14 +139,16 @@ typedef enum _KCF_FILTER_MODE
     FilterModeStartsWith,
     FilterModeEndsWith,
     FilterModeGreaterThan,
-    FilterModeLessThan
+    FilterModeLessThan,
+    FilterModeMaximum
 } KCF_FILTER_MODE;
 
 typedef enum _KCF_DATA_TYPE
 {
     DataTypeInvalid,
     DataTypeString, // UNICODE_STRING
-    DataTypeInteger // ULONGLONG
+    DataTypeInteger, // ULONGLONG
+    DataTypeMaximum
 } KCF_DATA_TYPE;
 
 typedef struct _KCF_DATA_ITEM
@@ -179,5 +180,6 @@ typedef struct _KCF_FILTER_DATA
 #define KCF_QUERYVERSION KCF_CTL_CODE(0)
 #define KCF_REMOVECALLBACK KCF_CTL_CODE(1)
 #define KCF_RETURNCALLBACK KCF_CTL_CODE(2)
+#define KCF_SETFILTERS KCF_CTL_CODE(3)
 
 #endif

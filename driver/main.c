@@ -41,11 +41,15 @@ NTSTATUS KcfpReadDriverParameters(
 #pragma alloc_text(PAGE, DriverUnload)
 #pragma alloc_text(PAGE, KcfpReadIntegerParameter)
 #pragma alloc_text(PAGE, KcfpReadDriverParameters)
+#pragma alloc_text(PAGE, KcfiQueryVersion)
 #endif
 
 PDRIVER_OBJECT KcfDriverObject;
 PDEVICE_OBJECT KcfDeviceObject;
 KCF_PARAMETERS KcfParameters;
+
+FAST_MUTEX KcfClientListLock;
+LIST_ENTRY KcfClientListHead;
 
 NTSTATUS DriverEntry(
     __in PDRIVER_OBJECT DriverObject,
@@ -84,6 +88,10 @@ NTSTATUS DriverEntry(
         goto ErrorExit;
 
     KcfClientInitialization();
+    KcfFilterInitialization();
+
+    ExInitializeFastMutex(&KcfClientListLock);
+    InitializeListHead(&KcfClientListHead);
 
     KcfDeviceObject = deviceObject;
 
@@ -167,6 +175,10 @@ NTSTATUS KcfDispatchCreate(
 
         if (NT_SUCCESS(status))
         {
+            ExAcquireFastMutex(&KcfClientListLock);
+            InsertTailList(&KcfClientListHead, &client->ListEntry);
+            ExReleaseFastMutex(&KcfClientListLock);
+
             fileObject->FsContext = client;
         }
         else
@@ -199,7 +211,16 @@ NTSTATUS KcfDispatchClose(
     client = fileObject->FsContext;
 
     if (client)
-        KcfDestroyClient(client);
+    {
+        KcfiSetFilters(NULL, 0, client, KernelMode);
+
+        ExAcquireFastMutex(&KcfClientListLock);
+        RemoveEntryList(&client->ListEntry);
+        ExReleaseFastMutex(&KcfClientListLock);
+
+        KcfCancelClient(client);
+        KcfDereferenceClient(client);
+    }
 
     Irp->IoStatus.Status = status;
     Irp->IoStatus.Information = 0;
@@ -348,4 +369,76 @@ NTSTATUS KcfiQueryVersion(
     }
 
     return STATUS_SUCCESS;
+}
+
+// Taken from Process Hacker, basesup.c
+/**
+ * Locates a string in a string.
+ *
+ * \param String1 The string to search.
+ * \param String2 The string to search for.
+ * \param IgnoreCase TRUE to perform a case-insensitive search, otherwise
+ * FALSE.
+ *
+ * \return The index, in characters, of the first occurrence of
+ * \a String2 in \a String1. If \a String2 was not found, -1 is returned.
+ */
+ULONG_PTR KcfFindUnicodeStringInUnicodeString(
+    __in PUNICODE_STRING String1,
+    __in PUNICODE_STRING String2,
+    __in BOOLEAN IgnoreCase
+    )
+{
+    SIZE_T length1;
+    SIZE_T length2;
+    UNICODE_STRING us1;
+    UNICODE_STRING us2;
+    WCHAR c;
+    SIZE_T i;
+
+    length1 = String1->Length / sizeof(WCHAR);
+    length2 = String2->Length / sizeof(WCHAR);
+
+    // Can't be a substring if it's bigger than the first string.
+    if (length2 > length1)
+        return -1;
+    // We always get a match if the substring is zero-length.
+    if (length2 == 0)
+        return 0;
+
+    us1.Buffer = String1->Buffer;
+    us1.Length = String2->Length - sizeof(WCHAR);
+    us1.MaximumLength = us1.Length;
+    us2.Buffer = String2->Buffer;
+    us2.Length = String2->Length - sizeof(WCHAR);
+    us2.MaximumLength = us2.Length;
+
+    if (!IgnoreCase)
+    {
+        c = *us2.Buffer++;
+
+        for (i = length1 - length2 + 1; i != 0; i--)
+        {
+            if (*us1.Buffer++ == c && RtlEqualUnicodeString(&us1, &us2, FALSE))
+            {
+                goto FoundUString;
+            }
+        }
+    }
+    else
+    {
+        c = RtlUpcaseUnicodeChar(*us2.Buffer++);
+
+        for (i = length1 - length2 + 1; i != 0; i--)
+        {
+            if (RtlUpcaseUnicodeChar(*us1.Buffer++) == c && RtlEqualUnicodeString(&us1, &us2, TRUE))
+            {
+                goto FoundUString;
+            }
+        }
+    }
+
+    return -1;
+FoundUString:
+    return (ULONG_PTR)(us1.Buffer - String1->Buffer - 1);
 }

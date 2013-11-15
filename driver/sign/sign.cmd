@@ -1,0 +1,1 @@
+call signfile.cmd ..\bin\amd64\umkcf.sys kmcs

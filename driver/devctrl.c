@@ -165,6 +165,24 @@ NTSTATUS KcfDispatchDeviceControl(
                 );
         }
         break;
+    case KCF_SETFILTERS:
+        {
+            struct
+            {
+                PKCF_FILTER_DATA Filters;
+                ULONG NumberOfFilters;
+            } *input = capturedInputPointer;
+
+            VERIFY_INPUT_LENGTH;
+
+            status = KcfiSetFilters(
+                input->Filters,
+                input->NumberOfFilters,
+                client,
+                accessMode
+                );
+        }
+        break;
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;

@@ -37,23 +37,22 @@ NTSTATUS KcfpCaptureReturnData(
     __in KPROCESSOR_MODE AccessMode
     );
 
-VOID KcfpFreeReturnData(
-    __in PKCF_CALLBACK_RETURN_DATA CapturedReturnData
-    );
-
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text(PAGE, KcfClientInitialization)
 #pragma alloc_text(PAGE, KcfClientUninitialization)
 #pragma alloc_text(PAGE, KcfCreateClient)
-#pragma alloc_text(PAGE, KcfDestroyClient)
+#pragma alloc_text(PAGE, KcfCancelClient)
+#pragma alloc_text(PAGE, KcfReferenceClient)
+#pragma alloc_text(PAGE, KcfDereferenceClient)
 #pragma alloc_text(PAGE, KcfCreateCallback)
-#pragma alloc_text(PAGE, KcfDestroyCallback)
+#pragma alloc_text(PAGE, KcfReferenceCallback)
+#pragma alloc_text(PAGE, KcfDereferenceCallback)
 #pragma alloc_text(PAGE, KcfFindCallback)
 #pragma alloc_text(PAGE, KcfPerformCallback)
 #pragma alloc_text(PAGE, KcfpCopyCallbackData)
 #pragma alloc_text(PAGE, KcfiRemoveCallback)
+#pragma alloc_text(PAGE, KcfFreeReturnData)
 #pragma alloc_text(PAGE, KcfpCaptureReturnData)
-#pragma alloc_text(PAGE, KcfpFreeReturnData)
 #pragma alloc_text(PAGE, KcfiReturnCallback)
 #endif
 
@@ -82,6 +81,7 @@ NTSTATUS KcfCreateClient(
     )
 {
     PKCF_CLIENT client;
+    ULONG i;
 
     PAGED_CODE();
 
@@ -90,27 +90,74 @@ NTSTATUS KcfCreateClient(
     if (!client)
         return STATUS_INSUFFICIENT_RESOURCES;
 
+    client->RefCount = 1;
     client->Flags = 0;
     client->LastCallbackId = 0;
-    ExInitializeFastMutex(&client->CallbackHashSetLock);
-    PhInitializeHashSet(client->CallbackHashSet, PH_HASH_SET_SIZE(client->CallbackHashSet));
+    ExInitializeFastMutex(&client->QueueLock);
     KeInitializeQueue(&client->Queue, 0);
-    InitializeListHead(&client->FilterListHead);
+    client->QueueCount = 0;
+    PhInitializeHashSet(client->CallbackHashSet, PH_HASH_SET_SIZE(client->CallbackHashSet));
+    ExInitializeFastMutex(&client->FilterListLock);
+
+    for (i = 0; i < KCF_CATEGORY_MAXIMUM; i++)
+        InitializeListHead(&client->FilterListHeads[i]);
 
     *Client = client;
 
     return STATUS_SUCCESS;
 }
 
-NTSTATUS KcfDestroyClient(
-    __post_invalid PKCF_CLIENT Client
+VOID KcfCancelClient(
+    __in PKCF_CLIENT Client
+    )
+{
+    ULONG i;
+    PPH_HASH_ENTRY entry;
+    PKCF_CALLBACK callback;
+
+    PAGED_CODE();
+
+    if (InterlockedBitTestAndSet(&Client->Flags, KCF_CLIENT_CANCELLED))
+        return;
+
+    ExAcquireFastMutex(&Client->QueueLock);
+
+    // Cancel all callbacks.
+    for (i = 0; i < PH_HASH_SET_SIZE(Client->CallbackHashSet); i++)
+    {
+        for (entry = Client->CallbackHashSet[i]; entry; entry = entry->Next)
+        {
+            callback = CONTAINING_RECORD(entry, KCF_CALLBACK, HashEntry);
+
+            InterlockedBitTestAndSet(&callback->Flags, KCF_CALLBACK_STATE_CANCELLED_SHIFT);
+
+            if (!InterlockedBitTestAndSet(&callback->Flags, KCF_CALLBACK_STATE_COMPLETED_SHIFT))
+                KeSetEvent(&callback->Event, 0, FALSE);
+        }
+    }
+
+    ExReleaseFastMutex(&Client->QueueLock);
+}
+
+VOID KcfReferenceClient(
+    __in PKCF_CLIENT Client
     )
 {
     PAGED_CODE();
 
-    ExFreePoolWithTag(Client, 'CfcK');
+    InterlockedIncrement(&Client->RefCount);
+}
 
-    return STATUS_SUCCESS;
+VOID KcfDereferenceClient(
+    __in PKCF_CLIENT Client
+    )
+{
+    PAGED_CODE();
+
+    if (InterlockedDecrement(&Client->RefCount) == 0)
+    {
+        ExFreePoolWithTag(Client, 'CfcK');
+    }
 }
 
 NTSTATUS KcfCreateCallback(
@@ -129,38 +176,43 @@ NTSTATUS KcfCreateCallback(
         return STATUS_INSUFFICIENT_RESOURCES;
 
     memset(callback, 0, sizeof(KCF_CALLBACK));
+    callback->RefCount = 1;
     callback->CallbackId = InterlockedIncrement(&Client->LastCallbackId);
     callback->Client = Client;
-    ExInitializeFastMutex(&callback->Lock);
     KeInitializeEvent(&callback->Event, NotificationEvent, FALSE);
     callback->Data = Data;
-
-    ExAcquireFastMutex(&Client->CallbackHashSetLock);
-    PhAddEntryHashSet(Client->CallbackHashSet, PH_HASH_SET_SIZE(Client->CallbackHashSet), &callback->HashEntry,
-        HASH_CALLBACK_ID(callback->CallbackId));
-    ExReleaseFastMutex(&Client->CallbackHashSetLock);
 
     *Callback = callback;
 
     return STATUS_SUCCESS;
 }
 
-NTSTATUS KcfDestroyCallback(
-    __post_invalid PKCF_CALLBACK Callback
+VOID KcfReferenceCallback(
+    __in PKCF_CALLBACK Callback
+    )
+{
+    PAGED_CODE();
+
+    InterlockedIncrement(&Callback->RefCount);
+}
+
+VOID KcfDereferenceCallback(
+    __in PKCF_CALLBACK Callback
     )
 {
     PKCF_CLIENT client;
 
     PAGED_CODE();
 
-    client = Callback->Client;
-    ExAcquireFastMutex(&client->CallbackHashSetLock);
-    PhRemoveEntryHashSet(client->CallbackHashSet, PH_HASH_SET_SIZE(client->CallbackHashSet), &Callback->HashEntry);
-    ExReleaseFastMutex(&client->CallbackHashSetLock);
+    if (InterlockedDecrement(&Callback->RefCount) == 0)
+    {
+        client = Callback->Client;
 
-    ExFreeToNPagedLookasideList(&KcfCallbackLookasideList, Callback);
+        if (Callback->ReturnData)
+            KcfFreeReturnData(Callback->ReturnData);
 
-    return STATUS_SUCCESS;
+        ExFreeToNPagedLookasideList(&KcfCallbackLookasideList, Callback);
+    }
 }
 
 PKCF_CALLBACK KcfFindCallback(
@@ -173,7 +225,13 @@ PKCF_CALLBACK KcfFindCallback(
 
     PAGED_CODE();
 
-    ExAcquireFastMutex(&Client->CallbackHashSetLock);
+    ExAcquireFastMutex(&Client->QueueLock);
+
+    if (Client->Flags & KCF_CLIENT_CANCELLED)
+    {
+        ExReleaseFastMutex(&Client->QueueLock);
+        return NULL;
+    }
 
     entry = PhFindEntryHashSet(
         Client->CallbackHashSet,
@@ -187,12 +245,13 @@ PKCF_CALLBACK KcfFindCallback(
 
         if (callback->CallbackId == CallbackId)
         {
-            ExReleaseFastMutex(&Client->CallbackHashSetLock);
+            KcfReferenceCallback(callback);
+            ExReleaseFastMutex(&Client->QueueLock);
             return callback;
         }
     }
 
-    ExReleaseFastMutex(&Client->CallbackHashSetLock);
+    ExReleaseFastMutex(&Client->QueueLock);
 
     return NULL;
 }
@@ -210,15 +269,35 @@ NTSTATUS KcfPerformCallback(
     PAGED_CODE();
 
     client = Callback->Client;
+
+    if (InterlockedBitTestAndSet(&Callback->Flags, KCF_CALLBACK_STATE_QUEUED_SHIFT))
+        return STATUS_UNSUCCESSFUL;
+
+    ExAcquireFastMutex(&client->QueueLock);
+
+    if ((client->Flags & KCF_CLIENT_CANCELLED) || client->QueueCount > KCF_MAXIMUM_QUEUED_CALLBACKS)
+    {
+        ExReleaseFastMutex(&client->QueueLock);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    PhAddEntryHashSet(client->CallbackHashSet, PH_HASH_SET_SIZE(client->CallbackHashSet), &Callback->HashEntry,
+        HASH_CALLBACK_ID(Callback->CallbackId));
     KeInsertQueue(&client->Queue, &Callback->ListEntry);
+    client->QueueCount++;
+
+    ExReleaseFastMutex(&client->QueueLock);
 
     // Wait for a callback return signal.
     status = KeWaitForSingleObject(&Callback->Event, Executive, WaitMode, FALSE, Timeout);
 
     if (status != STATUS_SUCCESS)
         return status;
+    if (Callback->Flags & KCF_CALLBACK_STATE_CANCELLED)
+        return STATUS_UNSUCCESSFUL;
 
     *ReturnData = Callback->ReturnData;
+    Callback->ReturnData = NULL;
 
     return STATUS_SUCCESS;
 }
@@ -266,11 +345,11 @@ NTSTATUS KcfpCopyCallbackData(
 
     switch (data.EventId.Value)
     {
-    case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_CREATE_PROCESS):
-        data.Parameters.CreateProcess.ImageFileName = zeroUnicodeString;
-        data.Parameters.CreateProcess.CommandLine = zeroUnicodeString;
-        returnLength += SourceData->Parameters.CreateProcess.ImageFileName.Length;
-        returnLength += SourceData->Parameters.CreateProcess.CommandLine.Length;
+    case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_PROCESS_CREATE):
+        data.Parameters.ProcessCreate.ImageFileName = zeroUnicodeString;
+        data.Parameters.ProcessCreate.CommandLine = zeroUnicodeString;
+        returnLength += SourceData->Parameters.ProcessCreate.ImageFileName.Length;
+        returnLength += SourceData->Parameters.ProcessCreate.CommandLine.Length;
         break;
     }
 
@@ -285,9 +364,9 @@ NTSTATUS KcfpCopyCallbackData(
 
         switch (data.EventId.Value)
         {
-        case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_CREATE_PROCESS):
-            KcfpCopyUnicodeString(&SourceData->Parameters.CreateProcess.ImageFileName, &Data->Parameters.CreateProcess.ImageFileName, &bufferPointer);
-            KcfpCopyUnicodeString(&SourceData->Parameters.CreateProcess.CommandLine, &Data->Parameters.CreateProcess.CommandLine, &bufferPointer);
+        case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_PROCESS_CREATE):
+            KcfpCopyUnicodeString(&SourceData->Parameters.ProcessCreate.ImageFileName, &Data->Parameters.ProcessCreate.ImageFileName, &bufferPointer);
+            KcfpCopyUnicodeString(&SourceData->Parameters.ProcessCreate.CommandLine, &Data->Parameters.ProcessCreate.CommandLine, &bufferPointer);
             break;
         }
     }
@@ -362,6 +441,9 @@ NTSTATUS KcfiRemoveCallback(
 
     listEntry = KeRemoveQueue(&Client->Queue, AccessMode, timeout);
 
+    if (Client->Flags & KCF_CLIENT_CANCELLED)
+        return STATUS_UNSUCCESSFUL;
+
     if ((LONG_PTR)listEntry == STATUS_TIMEOUT || (LONG_PTR)listEntry == STATUS_USER_APC ||
         (LONG_PTR)listEntry == STATUS_ABANDONED)
     {
@@ -374,6 +456,8 @@ NTSTATUS KcfiRemoveCallback(
 
     if (NT_SUCCESS(status))
     {
+        InterlockedDecrement(&Client->QueueCount);
+
         __try
         {
             *CallbackId = callback->CallbackId;
@@ -389,6 +473,15 @@ NTSTATUS KcfiRemoveCallback(
     }
 
     return status;
+}
+
+VOID KcfFreeReturnData(
+    __in PKCF_CALLBACK_RETURN_DATA ReturnData
+    )
+{
+    PAGED_CODE();
+
+    ExFreePoolWithTag(ReturnData, 'RfcK');
 }
 
 NTSTATUS KcfpCaptureReturnData(
@@ -412,15 +505,6 @@ NTSTATUS KcfpCaptureReturnData(
     return STATUS_SUCCESS;
 }
 
-VOID KcfpFreeReturnData(
-    __in PKCF_CALLBACK_RETURN_DATA CapturedReturnData
-    )
-{
-    PAGED_CODE();
-
-    ExFreePoolWithTag(CapturedReturnData, 'RfcK');
-}
-
 NTSTATUS KcfiReturnCallback(
     __in KCF_CALLBACK_ID CallbackId,
     __in NTSTATUS ReturnStatus,
@@ -438,7 +522,9 @@ NTSTATUS KcfiReturnCallback(
 
     PAGED_CODE();
 
-    if (ReturnDataLength < sizeof(KCF_CALLBACK_RETURN_DATA))
+    if (!ReturnData && ReturnDataLength != 0)
+        return STATUS_INVALID_PARAMETER_3;
+    if (ReturnData && ReturnDataLength < sizeof(KCF_CALLBACK_RETURN_DATA))
         return STATUS_INVALID_PARAMETER_4;
 
     if (AccessMode != KernelMode)
@@ -471,20 +557,50 @@ NTSTATUS KcfiReturnCallback(
     if (!callback)
         return STATUS_INVALID_PARAMETER_1;
 
+    if (!(callback->Flags & KCF_CALLBACK_STATE_QUEUED))
+    {
+        KcfDereferenceCallback(callback);
+        return STATUS_INVALID_PARAMETER_1;
+    }
+
+    capturedReturnData = NULL;
+
     if (returnData)
     {
         if (!KcfEqualEventId(returnData->EventId, callback->Data->EventId))
+        {
+            KcfDereferenceCallback(callback);
             return STATUS_INVALID_PARAMETER_3;
+        }
 
         status = KcfpCaptureReturnData(returnData, &capturedReturnData, AccessMode);
 
         if (!NT_SUCCESS(status))
+        {
+            KcfDereferenceCallback(callback);
             return status;
-
-        callback->ReturnData = capturedReturnData;
+        }
     }
 
-    KeSetEvent(&callback->Event, 0, FALSE);
+    if (!InterlockedBitTestAndSet(&callback->Flags, KCF_CALLBACK_STATE_COMPLETED_SHIFT))
+    {
+        ExAcquireFastMutex(&Client->QueueLock);
+        PhRemoveEntryHashSet(Client->CallbackHashSet, PH_HASH_SET_SIZE(Client->CallbackHashSet), &callback->HashEntry);
+        ExReleaseFastMutex(&Client->QueueLock);
 
-    return STATUS_SUCCESS;
+        callback->ReturnData = capturedReturnData;
+        KeSetEvent(&callback->Event, 0, FALSE);
+        status = STATUS_SUCCESS;
+    }
+    else
+    {
+        if (capturedReturnData)
+            KcfFreeReturnData(capturedReturnData);
+
+        status = STATUS_INVALID_PARAMETER_1;
+    }
+
+    KcfDereferenceCallback(callback);
+
+    return status;
 }
