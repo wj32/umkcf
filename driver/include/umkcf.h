@@ -30,6 +30,7 @@ typedef struct _KCF_CLIENT
     FAST_MUTEX CallbackHashSetLock;
     PPH_HASH_ENTRY CallbackHashSet[256];
     KQUEUE Queue;
+    LIST_ENTRY FilterListHead;
 } KCF_CLIENT, *PKCF_CLIENT;
 
 #define KCF_CALLBACK_STATE_QUEUED 0x1
@@ -127,6 +128,25 @@ NTSTATUS KcfiReturnCallback(
     __in ULONG ReturnDataLength,
     __in PKCF_CLIENT Client,
     __in KPROCESSOR_MODE AccessMode
+    );
+
+// filter
+
+typedef struct _KCF_FILTER
+{
+    LIST_ENTRY ListEntry;
+    LIST_ENTRY ClientListEntry;
+    PKCF_CLIENT Client;
+    KCF_FILTER_DATA Data;
+} KCF_FILTER, *PKCF_FILTER;
+
+VOID KcfFilterInitialization(
+    VOID
+    );
+
+BOOLEAN KcfFilterData(
+    __in PKCF_CALLBACK_DATA Data,
+    __in_opt PKCF_DATA_ITEM CustomValues
     );
 
 // devctrl

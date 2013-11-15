@@ -95,6 +95,7 @@ NTSTATUS KcfCreateClient(
     ExInitializeFastMutex(&client->CallbackHashSetLock);
     PhInitializeHashSet(client->CallbackHashSet, PH_HASH_SET_SIZE(client->CallbackHashSet));
     KeInitializeQueue(&client->Queue, 0);
+    InitializeListHead(&client->FilterListHead);
 
     *Client = client;
 

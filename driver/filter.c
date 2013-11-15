@@ -21,4 +21,31 @@
 
 #include <umkcf.h>
 
+LIST_ENTRY KcfFilterListHeads[CategoryMaximum];
 
+#ifdef ALLOC_PRAGMA
+#pragma alloc_text(PAGE, KcfFilterInitialization)
+#pragma alloc_text(PAGE, KcfFilterData)
+#endif
+
+VOID KcfFilterInitialization(
+    VOID
+    )
+{
+    ULONG i;
+
+    PAGED_CODE();
+
+    for (i = 0; i < CategoryMaximum; i++)
+        InitializeListHead(&KcfFilterListHeads[i]);
+}
+
+BOOLEAN KcfFilterData(
+    __in PKCF_CALLBACK_DATA Data,
+    __in_opt PKCF_DATA_ITEM CustomValues
+    )
+{
+    PAGED_CODE();
+
+    return FALSE;
+}

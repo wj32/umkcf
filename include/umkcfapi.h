@@ -26,6 +26,17 @@ typedef ULONG KCF_CALLBACK_ID, *PKCF_CALLBACK_ID;
 #define KCF_CATEGORY_REGISTRY 0x8
 #define KCF_CATEGORY_FILE 0x10
 
+// Internal use only
+typedef enum _KCF_CATEGORY
+{
+    CategoryFramework = 0,
+    CategoryProcess = 1,
+    CategoryObject = 2,
+    CategoryRegistry = 3,
+    CategoryFile = 4,
+    CategoryMaximum
+} KCF_CATEGORY;
+
 // Process
 #define KCF_PROCESS_EVENT_CREATE_PROCESS 0
 #define KCF_PROCESS_EVENT_EXIT_PROCESS 1
@@ -39,8 +50,8 @@ typedef struct _KCF_EVENT_ID
     {
         struct
         {
-            USHORT Category;
-            USHORT Event;
+            USHORT Category; // KCF_CATEGORY_*
+            USHORT Event; // KCF_*_EVENT_*
         };
         ULONG Value;
     };
@@ -106,14 +117,60 @@ typedef struct _KCF_CALLBACK_RETURN_DATA
     } Parameters;
 } KCF_CALLBACK_RETURN_DATA, *PKCF_CALLBACK_RETURN_DATA;
 
+typedef enum _KCF_FILTER_TYPE
+{
+    FilterInclude,
+    FilterExclude
+} KCF_FILTER_TYPE;
+
 typedef enum _KCF_FILTER_KEY
 {
     FilterKeyNone,
     FilterKeyProcessId, // i: source process ID
     FilterKeyProcessName, // s: source process name
     FilterKeyProcessFileName, // s: source process file name
-    FilterKeyPath // s: file name or registry path
+    FilterKeyPath, // s: file name or registry path
+    FilterKeyMaximum
 } KCF_FILTER_KEY;
+
+typedef enum _KCF_FILTER_MODE
+{
+    FilterModeEquals,
+    FilterModeContains,
+    FilterModeStartsWith,
+    FilterModeEndsWith,
+    FilterModeGreaterThan,
+    FilterModeLessThan
+} KCF_FILTER_MODE;
+
+typedef enum _KCF_DATA_TYPE
+{
+    DataTypeInvalid,
+    DataTypeString, // UNICODE_STRING
+    DataTypeInteger // ULONGLONG
+} KCF_DATA_TYPE;
+
+typedef struct _KCF_DATA_ITEM
+{
+    KCF_DATA_TYPE Type;
+    union
+    {
+        UNICODE_STRING String;
+        ULONGLONG Integer;
+    } u;
+} KCF_DATA_ITEM, *PKCF_DATA_ITEM;
+
+typedef struct _KCF_FILTER_DATA
+{
+    KCF_FILTER_TYPE Type;
+    USHORT Category;
+    USHORT Reserved;
+    ULONGLONG EventMask;
+
+    KCF_FILTER_KEY Key;
+    KCF_FILTER_MODE Mode;
+    KCF_DATA_ITEM DataItem;
+} KCF_FILTER_DATA, *PKCF_FILTER_DATA;
 
 // Control codes
 
