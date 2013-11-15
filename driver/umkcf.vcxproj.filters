@@ -27,6 +27,9 @@
     <ClCompile Include="pscall.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="filter.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ntfill.h">

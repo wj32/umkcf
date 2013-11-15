@@ -11,9 +11,11 @@ TARGETPATH=..\bin
 INCLUDES=$(DDK_INC_PATH);..\include;..\..\include;..\..\include\sys
 LIBS=%BUILD%\lib
 
+MSC_WARNING_LEVEL=/WX
 SOURCES= \
     ..\main.c \
 	..\client.c \
     ..\devctrl.c \
+	..\filter.c \
 	..\pscall.c \
     ..\resource.rc

@@ -23,6 +23,24 @@
 
 #define HASH_CALLBACK_ID(CallbackId) ((ULONG)(CallbackId))
 
+NTSTATUS KcfpCopyCallbackData(
+    __in PKCF_CALLBACK_DATA SourceData,
+    __out PKCF_CALLBACK_DATA Data,
+    __in ULONG DataLength,
+    __out_opt PULONG ReturnLength,
+    __in KPROCESSOR_MODE AccessMode
+    );
+
+NTSTATUS KcfpCaptureReturnData(
+    __in PKCF_CALLBACK_RETURN_DATA ReturnData,
+    __out PKCF_CALLBACK_RETURN_DATA *CapturedReturnData,
+    __in KPROCESSOR_MODE AccessMode
+    );
+
+VOID KcfpFreeReturnData(
+    __in PKCF_CALLBACK_RETURN_DATA CapturedReturnData
+    );
+
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text(PAGE, KcfClientInitialization)
 #pragma alloc_text(PAGE, KcfClientUninitialization)
@@ -32,7 +50,10 @@
 #pragma alloc_text(PAGE, KcfDestroyCallback)
 #pragma alloc_text(PAGE, KcfFindCallback)
 #pragma alloc_text(PAGE, KcfPerformCallback)
+#pragma alloc_text(PAGE, KcfpCopyCallbackData)
 #pragma alloc_text(PAGE, KcfiRemoveCallback)
+#pragma alloc_text(PAGE, KcfpCaptureReturnData)
+#pragma alloc_text(PAGE, KcfpFreeReturnData)
 #pragma alloc_text(PAGE, KcfiReturnCallback)
 #endif
 
@@ -109,6 +130,7 @@ NTSTATUS KcfCreateCallback(
     memset(callback, 0, sizeof(KCF_CALLBACK));
     callback->CallbackId = InterlockedIncrement(&Client->LastCallbackId);
     callback->Client = Client;
+    ExInitializeFastMutex(&callback->Lock);
     KeInitializeEvent(&callback->Event, NotificationEvent, FALSE);
     callback->Data = Data;
 
@@ -176,6 +198,8 @@ PKCF_CALLBACK KcfFindCallback(
 
 NTSTATUS KcfPerformCallback(
     __in PKCF_CALLBACK Callback,
+    __in KPROCESSOR_MODE WaitMode,
+    __in_opt PLARGE_INTEGER Timeout,
     __out PKCF_CALLBACK_RETURN_DATA *ReturnData
     )
 {
@@ -188,7 +212,7 @@ NTSTATUS KcfPerformCallback(
     KeInsertQueue(&client->Queue, &Callback->ListEntry);
 
     // Wait for a callback return signal.
-    status = KeWaitForSingleObject(&Callback->Event, Executive, KernelMode, FALSE, NULL);
+    status = KeWaitForSingleObject(&Callback->Event, Executive, WaitMode, FALSE, Timeout);
 
     if (status != STATUS_SUCCESS)
         return status;
@@ -198,32 +222,88 @@ NTSTATUS KcfPerformCallback(
     return STATUS_SUCCESS;
 }
 
+FORCEINLINE VOID KcfpCopyUnicodeString(
+    __in PUNICODE_STRING SourceString,
+    __out PUNICODE_STRING DestinationString,
+    __inout PUCHAR *BufferPointer
+    )
+{
+    if (SourceString->Length != 0 && SourceString->Buffer)
+    {
+        DestinationString->Length = SourceString->Length;
+        DestinationString->MaximumLength = SourceString->Length;
+        memcpy(*BufferPointer, SourceString->Buffer, SourceString->Length);
+        DestinationString->Buffer = (PWSTR)*BufferPointer;
+        *BufferPointer += SourceString->Length;
+    }
+    else
+    {
+        DestinationString->Length = 0;
+        DestinationString->MaximumLength = 0;
+        DestinationString->Buffer = NULL;
+    }
+}
+
 NTSTATUS KcfpCopyCallbackData(
+    __in PKCF_CALLBACK_DATA SourceData,
     __out PKCF_CALLBACK_DATA Data,
     __in ULONG DataLength,
     __out_opt PULONG ReturnLength,
     __in KPROCESSOR_MODE AccessMode
     )
 {
-    if (DataLength < sizeof(KCF_CALLBACK_DATA))
+    static UNICODE_STRING zeroUnicodeString;
+
+    KCF_CALLBACK_DATA data;
+    ULONG returnLength;
+    PUCHAR bufferPointer;
+
+    PAGED_CODE();
+
+    data = *SourceData;
+    returnLength = sizeof(KCF_CALLBACK_DATA);
+
+    switch (data.EventId.Value)
+    {
+    case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_CREATE_PROCESS):
+        data.Parameters.CreateProcess.ImageFileName = zeroUnicodeString;
+        data.Parameters.CreateProcess.CommandLine = zeroUnicodeString;
+        returnLength += SourceData->Parameters.CreateProcess.ImageFileName.Length;
+        returnLength += SourceData->Parameters.CreateProcess.CommandLine.Length;
+        break;
+    }
+
+    if (DataLength < returnLength)
         return STATUS_BUFFER_TOO_SMALL;
+
+    __try
+    {
+        bufferPointer = (PUCHAR)Data;
+        memcpy(bufferPointer, &data, sizeof(KCF_CALLBACK_DATA));
+        bufferPointer += sizeof(KCF_CALLBACK_DATA);
+
+        switch (data.EventId.Value)
+        {
+        case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_CREATE_PROCESS):
+            KcfpCopyUnicodeString(&SourceData->Parameters.CreateProcess.ImageFileName, &Data->Parameters.CreateProcess.ImageFileName, &bufferPointer);
+            KcfpCopyUnicodeString(&SourceData->Parameters.CreateProcess.CommandLine, &Data->Parameters.CreateProcess.CommandLine, &bufferPointer);
+            break;
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        NOTHING;
+    }
 
     if (ReturnLength)
     {
-        if (AccessMode != KernelMode)
+        __try
         {
-            __try
-            {
-                *ReturnLength = sizeof(KCF_CALLBACK_DATA);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                NOTHING;
-            }
+            *ReturnLength = returnLength;
         }
-        else
+        __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            *ReturnLength = sizeof(KCF_CALLBACK_DATA);
+            NOTHING;
         }
     }
 
@@ -289,24 +369,17 @@ NTSTATUS KcfiRemoveCallback(
 
     callback = CONTAINING_RECORD(listEntry, KCF_CALLBACK, ListEntry);
 
-    status = KcfpCopyCallbackData(Data, DataLength, ReturnLength, AccessMode);
+    status = KcfpCopyCallbackData(callback->Data, Data, DataLength, ReturnLength, AccessMode);
 
     if (NT_SUCCESS(status))
     {
-        if (AccessMode != KernelMode)
-        {
-            __try
-            {
-                *CallbackId = callback->CallbackId;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                NOTHING;
-            }
-        }
-        else
+        __try
         {
             *CallbackId = callback->CallbackId;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            NOTHING;
         }
     }
     else
@@ -314,7 +387,37 @@ NTSTATUS KcfiRemoveCallback(
         KeInsertHeadQueue(&Client->Queue, &callback->ListEntry);
     }
 
+    return status;
+}
+
+NTSTATUS KcfpCaptureReturnData(
+    __in PKCF_CALLBACK_RETURN_DATA ReturnData,
+    __out PKCF_CALLBACK_RETURN_DATA *CapturedReturnData,
+    __in KPROCESSOR_MODE AccessMode
+    )
+{
+    PKCF_CALLBACK_RETURN_DATA capturedReturnData;
+
+    PAGED_CODE();
+
+    capturedReturnData = ExAllocatePoolWithTag(PagedPool, sizeof(KCF_CALLBACK_RETURN_DATA), 'RfcK');
+
+    if (!capturedReturnData)
+        return STATUS_INSUFFICIENT_RESOURCES;
+
+    memcpy(capturedReturnData, ReturnData, sizeof(KCF_CALLBACK_RETURN_DATA));
+    *CapturedReturnData = capturedReturnData;
+
     return STATUS_SUCCESS;
+}
+
+VOID KcfpFreeReturnData(
+    __in PKCF_CALLBACK_RETURN_DATA CapturedReturnData
+    )
+{
+    PAGED_CODE();
+
+    ExFreePoolWithTag(CapturedReturnData, 'RfcK');
 }
 
 NTSTATUS KcfiReturnCallback(
@@ -328,8 +431,9 @@ NTSTATUS KcfiReturnCallback(
 {
     NTSTATUS status;
     PKCF_CALLBACK_RETURN_DATA returnData;
-    KCF_CALLBACK_RETURN_DATA capturedReturnData;
+    KCF_CALLBACK_RETURN_DATA tempReturnData;
     PKCF_CALLBACK callback;
+    PKCF_CALLBACK_RETURN_DATA capturedReturnData;
 
     PAGED_CODE();
 
@@ -343,8 +447,8 @@ NTSTATUS KcfiReturnCallback(
             if (ReturnData)
             {
                 ProbeForRead(ReturnData, ReturnDataLength, sizeof(ULONG));
-                capturedReturnData = *ReturnData;
-                returnData = &capturedReturnData;
+                tempReturnData = *ReturnData;
+                returnData = &tempReturnData;
             }
             else
             {
@@ -365,8 +469,21 @@ NTSTATUS KcfiReturnCallback(
 
     if (!callback)
         return STATUS_INVALID_PARAMETER_1;
-    if (returnData && returnData->EventId != callback->Data->EventId)
-        return STATUS_INVALID_PARAMETER_3;
 
-    return STATUS_NOT_IMPLEMENTED;
+    if (returnData)
+    {
+        if (!KcfEqualEventId(returnData->EventId, callback->Data->EventId))
+            return STATUS_INVALID_PARAMETER_3;
+
+        status = KcfpCaptureReturnData(returnData, &capturedReturnData, AccessMode);
+
+        if (!NT_SUCCESS(status))
+            return status;
+
+        callback->ReturnData = capturedReturnData;
+    }
+
+    KeSetEvent(&callback->Event, 0, FALSE);
+
+    return STATUS_SUCCESS;
 }

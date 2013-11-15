@@ -41,11 +41,25 @@ typedef struct _KCF_CALLBACK
     LIST_ENTRY ListEntry; // queue
     KCF_CALLBACK_ID CallbackId;
     PKCF_CLIENT Client;
+
+    FAST_MUTEX Lock;
     ULONG Flags;
     KEVENT Event;
     PKCF_CALLBACK_DATA Data;
-    PKCF_CALLBACK_RETURN_DATA *ReturnData;
+    PKCF_CALLBACK_RETURN_DATA ReturnData;
 } KCF_CALLBACK, *PKCF_CALLBACK;
+
+FORCEINLINE VOID KcfInitializeCallbackData(
+    __out PKCF_CALLBACK_DATA Data,
+    __in KCF_EVENT_ID EventId
+    )
+{
+    memset(Data, 0, sizeof(KCF_CALLBACK_DATA));
+    Data->EventId = EventId;
+    Data->ClientId.UniqueProcess = PsGetCurrentProcessId();
+    Data->ClientId.UniqueThread = PsGetCurrentThreadId();
+    KeQuerySystemTime(&Data->TimeStamp);
+}
 
 // main
 
@@ -74,17 +88,6 @@ NTSTATUS KcfDestroyClient(
     __post_invalid PKCF_CLIENT Client
     );
 
-FORCEINLINE VOID KcfInitializeCallbackData(
-    __out PKCF_CALLBACK_DATA Data,
-    __in ULONGLONG EventId
-    )
-{
-    memset(Data, 0, sizeof(KCF_CALLBACK_DATA));
-    Data->EventId = EventId;
-    Data->ClientId.UniqueProcess = PsGetCurrentProcessId();
-    Data->ClientId.UniqueThread = PsGetCurrentThreadId();
-}
-
 NTSTATUS KcfCreateCallback(
     __out PKCF_CALLBACK *Callback,
     __in PKCF_CLIENT Client,
@@ -102,6 +105,8 @@ PKCF_CALLBACK KcfFindCallback(
 
 NTSTATUS KcfPerformCallback(
     __in PKCF_CALLBACK Callback,
+    __in KPROCESSOR_MODE WaitMode,
+    __in_opt PLARGE_INTEGER Timeout,
     __out PKCF_CALLBACK_RETURN_DATA *ReturnData
     );
 

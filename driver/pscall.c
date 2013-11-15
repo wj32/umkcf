@@ -75,7 +75,7 @@ VOID KcfpCreateProcessNotifyRoutineEx(
 
     PAGED_CODE();
 
-    KcfInitializeCallbackData(&data, CreateInfo ? KCF_EVENT_CREATE_PROCESS : KCF_EVENT_EXIT_PROCESS);
+    KcfInitializeCallbackData(&data, KcfMakeEventId(KCF_CATEGORY_PROCESS, CreateInfo ? KCF_PROCESS_EVENT_CREATE_PROCESS : KCF_PROCESS_EVENT_EXIT_PROCESS));
     data.Parameters.CreateProcess.ProcessId = ProcessId;
 
     if (CreateInfo)

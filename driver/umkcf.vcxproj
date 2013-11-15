@@ -103,6 +103,7 @@
   <ItemGroup>
     <ClCompile Include="client.c" />
     <ClCompile Include="devctrl.c" />
+    <ClCompile Include="filter.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="pscall.c" />
   </ItemGroup>

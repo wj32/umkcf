@@ -119,6 +119,52 @@ NTSTATUS KcfDispatchDeviceControl(
                 );
         }
         break;
+    case KCF_REMOVECALLBACK:
+        {
+            struct
+            {
+                PLARGE_INTEGER Timeout;
+                PKCF_CALLBACK_ID CallbackId;
+                PKCF_CALLBACK_DATA Data;
+                ULONG DataLength;
+                PULONG ReturnLength;
+            } *input = capturedInputPointer;
+
+            VERIFY_INPUT_LENGTH;
+
+            status = KcfiRemoveCallback(
+                input->Timeout,
+                input->CallbackId,
+                input->Data,
+                input->DataLength,
+                input->ReturnLength,
+                client,
+                accessMode
+                );
+        }
+        break;
+    case KCF_RETURNCALLBACK:
+        {
+            struct
+            {
+                KCF_CALLBACK_ID CallbackId;
+                NTSTATUS ReturnStatus;
+                PKCF_CALLBACK_RETURN_DATA ReturnData;
+                ULONG ReturnDataLength;
+            } *input = capturedInputPointer;
+
+            VERIFY_INPUT_LENGTH;
+
+            status = KcfiReturnCallback(
+                input->CallbackId,
+                input->ReturnStatus,
+                input->ReturnData,
+                input->ReturnDataLength,
+                client,
+                accessMode
+                );
+        }
+        break;
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;
