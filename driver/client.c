@@ -284,7 +284,7 @@ NTSTATUS KcfPerformCallback(
     PhAddEntryHashSet(client->CallbackHashSet, PH_HASH_SET_SIZE(client->CallbackHashSet), &Callback->HashEntry,
         HASH_CALLBACK_ID(Callback->CallbackId));
     KeInsertQueue(&client->Queue, &Callback->ListEntry);
-    client->QueueCount++;
+    InterlockedIncrement(&client->QueueCount);
 
     ExReleaseFastMutex(&client->QueueLock);
 
