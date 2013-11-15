@@ -23,12 +23,13 @@ typedef enum _KCF_SECURITY_LEVEL
 typedef ULONG KCF_CALLBACK_ID, *PKCF_CALLBACK_ID;
 
 // Categories
-#define KCF_CATEGORY_FRAMEWORK 0
-#define KCF_CATEGORY_PROCESS 1
-#define KCF_CATEGORY_OBJECT 2
-#define KCF_CATEGORY_REGISTRY 3
-#define KCF_CATEGORY_FILE 4
-#define KCF_CATEGORY_MAXIMUM 5
+#define KCF_CATEGORY_ALL 0
+#define KCF_CATEGORY_SPECIAL 1
+#define KCF_CATEGORY_PROCESS 2
+#define KCF_CATEGORY_OBJECT 3
+#define KCF_CATEGORY_REGISTRY 4
+#define KCF_CATEGORY_FILE 5
+#define KCF_CATEGORY_MAXIMUM 6
 
 // Process
 #define KCF_PROCESS_EVENT_PROCESS_CREATE 0
@@ -94,6 +95,30 @@ typedef struct _KCF_CALLBACK_DATA
         {
             HANDLE ProcessId;
         } ProcessExit;
+        struct
+        {
+            CLIENT_ID ThreadId;
+        } ThreadCreateExit;
+        struct
+        {
+            UNICODE_STRING FullImageName;
+            HANDLE ProcessId;
+            union
+            {
+                ULONG Properties;
+                struct
+                {
+                    ULONG ImageAddressingMode : 8; // code addressing mode
+                    ULONG SystemModeImage : 1; // system mode image
+                    ULONG ImageMappedToAllPids : 1; // mapped in all processes
+                    ULONG Reserved : 22;
+                };
+                PVOID ImageBase;
+                ULONG ImageSelector;
+                ULONG ImageSize;
+                ULONG ImageSectionNumber;
+            };
+        } ImageLoad;
     } Parameters;
 } KCF_CALLBACK_DATA, *PKCF_CALLBACK_DATA;
 

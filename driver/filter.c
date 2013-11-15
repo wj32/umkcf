@@ -409,7 +409,7 @@ BOOLEAN KcfpMatchFilter(
 {
     PAGED_CODE();
 
-    if (FilterData->Category != Data->EventId.Category)
+    if (FilterData->Category != KCF_CATEGORY_ALL && FilterData->Category != Data->EventId.Category)
         return FALSE;
     if (!(FilterData->EventMask & (1 << Data->EventId.Event)))
         return FALSE;
@@ -433,6 +433,44 @@ VOID KcfpSetDefaultValues(
     }
 }
 
+FORCEINLINE VOID KcfpFilterCategory(
+    __in PKCF_CLIENT Client,
+    __in USHORT Category,
+    __in PKCF_CALLBACK_DATA Data,
+    __in PKCF_DATA_ITEM Values,
+    __inout PBOOLEAN Include,
+    __inout PBOOLEAN Exclude
+    )
+{
+    PLIST_ENTRY listHead;
+    PLIST_ENTRY currentEntry;
+    PKCF_FILTER filter;
+
+    listHead = &Client->FilterListHeads[Category];
+
+    ExAcquireFastMutex(&Client->FilterListLock);
+
+    for (currentEntry = listHead->Flink; currentEntry != listHead; currentEntry = currentEntry->Flink)
+    {
+        filter = CONTAINING_RECORD(currentEntry, KCF_FILTER, ListEntry);
+
+        if (KcfpMatchFilter(&filter->Data, Data, Values))
+        {
+            if (filter->Data.Type == FilterInclude)
+            {
+                *Include = TRUE;
+            }
+            else
+            {
+                *Exclude = TRUE;
+                break;
+            }
+        }
+    }
+
+    ExReleaseFastMutex(&Client->FilterListLock);
+}
+
 BOOLEAN KcfpFilterClient(
     __in PKCF_CLIENT Client,
     __in PKCF_CALLBACK_DATA Data,
@@ -447,33 +485,20 @@ BOOLEAN KcfpFilterClient(
 
     PAGED_CODE();
 
-    listHead = &Client->FilterListHeads[Data->EventId.Category];
     include = FALSE;
     exclude = FALSE;
 
-    ExAcquireFastMutex(&Client->FilterListLock);
+    KcfpFilterCategory(Client, KCF_CATEGORY_ALL, Data, Values, &include, &exclude);
 
-    for (currentEntry = listHead->Flink; currentEntry != listHead; currentEntry = currentEntry->Flink)
-    {
-        filter = CONTAINING_RECORD(currentEntry, KCF_FILTER, ListEntry);
+    if (exclude)
+        return FALSE;
 
-        if (KcfpMatchFilter(&filter->Data, Data, Values))
-        {
-            if (filter->Data.Type == FilterInclude)
-            {
-                include = TRUE;
-            }
-            else
-            {
-                exclude = TRUE;
-                break;
-            }
-        }
-    }
+    KcfpFilterCategory(Client, Data->EventId.Category, Data, Values, &include, &exclude);
 
-    ExReleaseFastMutex(&Client->FilterListLock);
+    if (exclude)
+        return FALSE;
 
-    return include && !exclude;
+    return include;
 }
 
 BOOLEAN KcfGetClientsForCallback(

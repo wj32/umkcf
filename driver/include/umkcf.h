@@ -161,7 +161,7 @@ NTSTATUS KcfPerformCallback(
     __in PKCF_CALLBACK Callback,
     __in KPROCESSOR_MODE WaitMode,
     __in_opt PLARGE_INTEGER Timeout,
-    __out PKCF_CALLBACK_RETURN_DATA *ReturnData
+    __out_opt PKCF_CALLBACK_RETURN_DATA *ReturnData
     );
 
 NTSTATUS KcfiRemoveCallback(

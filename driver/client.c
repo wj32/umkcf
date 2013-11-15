@@ -260,7 +260,7 @@ NTSTATUS KcfPerformCallback(
     __in PKCF_CALLBACK Callback,
     __in KPROCESSOR_MODE WaitMode,
     __in_opt PLARGE_INTEGER Timeout,
-    __out PKCF_CALLBACK_RETURN_DATA *ReturnData
+    __out_opt PKCF_CALLBACK_RETURN_DATA *ReturnData
     )
 {
     NTSTATUS status;
@@ -296,7 +296,11 @@ NTSTATUS KcfPerformCallback(
     if (Callback->Flags & KCF_CALLBACK_STATE_CANCELLED)
         return STATUS_UNSUCCESSFUL;
 
-    *ReturnData = Callback->ReturnData;
+    if (ReturnData)
+        *ReturnData = Callback->ReturnData;
+    else if (Callback->ReturnData)
+        KcfFreeReturnData(Callback->ReturnData);
+
     Callback->ReturnData = NULL;
 
     return STATUS_SUCCESS;
@@ -351,6 +355,10 @@ NTSTATUS KcfpCopyCallbackData(
         returnLength += SourceData->Parameters.ProcessCreate.ImageFileName.Length;
         returnLength += SourceData->Parameters.ProcessCreate.CommandLine.Length;
         break;
+    case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_IMAGE_LOAD):
+        data.Parameters.ImageLoad.FullImageName = zeroUnicodeString;
+        returnLength += SourceData->Parameters.ImageLoad.FullImageName.Length;
+        break;
     }
 
     if (DataLength < returnLength)
@@ -367,6 +375,9 @@ NTSTATUS KcfpCopyCallbackData(
         case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_PROCESS_CREATE):
             KcfpCopyUnicodeString(&SourceData->Parameters.ProcessCreate.ImageFileName, &Data->Parameters.ProcessCreate.ImageFileName, &bufferPointer);
             KcfpCopyUnicodeString(&SourceData->Parameters.ProcessCreate.CommandLine, &Data->Parameters.ProcessCreate.CommandLine, &bufferPointer);
+            break;
+        case KCF_MAKE_EVENT_ID_VALUE(KCF_CATEGORY_PROCESS, KCF_PROCESS_EVENT_IMAGE_LOAD):
+            KcfpCopyUnicodeString(&SourceData->Parameters.ImageLoad.FullImageName, &Data->Parameters.ImageLoad.FullImageName, &bufferPointer);
             break;
         }
     }
