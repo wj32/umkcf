@@ -20,24 +20,24 @@ UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfConnect(
-    _In_opt_ PWSTR DeviceName
+    __in_opt PWSTR DeviceName
     );
 
 UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfConnect2(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName
     );
 
 UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfConnect2Ex(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName,
-    _In_opt_ PKCF_PARAMETERS Parameters
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName,
+    __in_opt PKCF_PARAMETERS Parameters
     );
 
 UMKCFCLAPI
@@ -58,39 +58,39 @@ UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfSetParameters(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PKCF_PARAMETERS Parameters
+    __in_opt PWSTR DeviceName,
+    __in PKCF_PARAMETERS Parameters
     );
 
 UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfInstall(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName
     );
 
 UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfInstallEx(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName,
-    _In_opt_ PKCF_PARAMETERS Parameters
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName,
+    __in_opt PKCF_PARAMETERS Parameters
     );
 
 UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfUninstall(
-    _In_opt_ PWSTR DeviceName
+    __in_opt PWSTR DeviceName
     );
 
 UMKCFCLAPI
 NTSTATUS
 NTAPI
 KcfQueryVersion(
-    _Out_ PULONG Version
+    __out PULONG Version
     );
 
 UMKCFCLAPI

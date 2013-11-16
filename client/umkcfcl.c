@@ -29,15 +29,15 @@
 #include <umkcfcl.h>
 
 NTSTATUS KcfpDeviceIoControl(
-    _In_ ULONG KcfControlCode,
-    _In_ PVOID InBuffer,
-    _In_ ULONG InBufferLength
+    __in ULONG KcfControlCode,
+    __in PVOID InBuffer,
+    __in ULONG InBufferLength
     );
 
 HANDLE KcfHandle = NULL;
 
 NTSTATUS KcfConnect(
-    _In_opt_ PWSTR DeviceName
+    __in_opt PWSTR DeviceName
     )
 {
     NTSTATUS status;
@@ -80,17 +80,17 @@ NTSTATUS KcfConnect(
 }
 
 NTSTATUS KcfConnect2(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName
     )
 {
     return KcfConnect2Ex(DeviceName, FileName, NULL);
 }
 
 NTSTATUS KcfConnect2Ex(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName,
-    _In_opt_ PKCF_PARAMETERS Parameters
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName,
+    __in_opt PKCF_PARAMETERS Parameters
     )
 {
     NTSTATUS status;
@@ -249,8 +249,8 @@ BOOLEAN KcfIsConnected(
 }
 
 NTSTATUS KcfSetParameters(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PKCF_PARAMETERS Parameters
+    __in_opt PWSTR DeviceName,
+    __in PKCF_PARAMETERS Parameters
     )
 {
     NTSTATUS status;
@@ -311,17 +311,17 @@ SetValuesEnd:
 }
 
 NTSTATUS KcfInstall(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName
     )
 {
     return KcfInstallEx(DeviceName, FileName, NULL);
 }
 
 NTSTATUS KcfInstallEx(
-    _In_opt_ PWSTR DeviceName,
-    _In_ PWSTR FileName,
-    _In_opt_ PKCF_PARAMETERS Parameters
+    __in_opt PWSTR DeviceName,
+    __in PWSTR FileName,
+    __in_opt PKCF_PARAMETERS Parameters
     )
 {
     NTSTATUS status = STATUS_SUCCESS;
@@ -383,7 +383,7 @@ CreateEnd:
 }
 
 NTSTATUS KcfUninstall(
-    _In_opt_ PWSTR DeviceName
+    __in_opt PWSTR DeviceName
     )
 {
     NTSTATUS status = STATUS_SUCCESS;
@@ -422,9 +422,9 @@ NTSTATUS KcfUninstall(
 }
 
 NTSTATUS KcfpDeviceIoControl(
-    _In_ ULONG KcfControlCode,
-    _In_ PVOID InBuffer,
-    _In_ ULONG InBufferLength
+    __in ULONG KcfControlCode,
+    __in PVOID InBuffer,
+    __in ULONG InBufferLength
     )
 {
     IO_STATUS_BLOCK isb;
@@ -444,7 +444,7 @@ NTSTATUS KcfpDeviceIoControl(
 }
 
 NTSTATUS KcfQueryVersion(
-    _Out_ PULONG Version
+    __out PULONG Version
     )
 {
     struct
